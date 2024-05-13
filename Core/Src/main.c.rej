@@ -1,0 +1,10 @@
+diff a/Core/Src/main.c b/Core/Src/main.c	(rejected hunks)
+@@ -62,7 +62,7 @@
+ float tempf=0.0f;
+ int tempi=0;
+ 
+-float VAPLI=3.475;
++float VAPLI=3.47;
+ float VCALIB=3.00;
+ float VBAT=0;
+ float VREF=0;
