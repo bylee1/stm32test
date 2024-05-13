@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "adc.h"
+#include "dma.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -26,19 +27,17 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "math.h"
+#include <stdbool.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-#define TEMP30_CAL_ADDR      ((uint16_t*)((uint32_t)0x1FFF75A8))
-#define TEMP130_CAL_ADDR   ((uint16_t*)((uint32_t)0x1FFF75CA))
+
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-uint16_t value_adc=0;
-float    value_volt=0.0f;
 
 /* USER CODE END PD */
 
@@ -50,22 +49,12 @@ float    value_volt=0.0f;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-#define TEMP_CAL2                          130
-#define TEMP_CAL1                          30
-#define TS_CAL1			                      ((uint16_t*) (0x1FFF75A8UL))
-#define TS_CAL2			                      ((uint16_t*) (0x1FFF75CAUL))
-#define VREFINTCAL							  ((uint16_t*)(0x1FFF75AAUL))
 
-int ADCstep_temp=0;
-int ADCstep_VBAT=0;
-int ADCstep_VREF=0;
-float tempf=0.0f;
-int tempi=0;
 
-float VCALIB=3.00;
-float VBAT=0;
-float VREF=0;
-int inc=0;
+static bool flag_ADCDone = false;
+uint16_t ADCValue[2];
+float TemperatureValue = 0;
+float VrefVoltage = 0;
 
 /* USER CODE END PV */
 
@@ -92,41 +81,37 @@ PUTCHAR_PROTOTYPE
    return ch;
 }
 
-static void select_ADC_VBAT(void)
+
+
+
+void ADCInit(void)
 {
-	ADC_ChannelConfTypeDef sConfig = {0};
-	sConfig.Channel = ADC_CHANNEL_VBAT;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-	{
-		Error_Handler();
-	}
+	HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED); /* ADC Calibration */
+	HAL_Delay(1);
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADCValue, 2); /* ADC ?ï¿½ï¿½?ï¿½ï¿½ */
 }
 
-
-
-static void select_ADC_VREFINT(void)
+/**
+* @brief ADC ?ï¿½ï¿½ï¿?? ?ï¿½ï¿½?ï¿½ï¿½?ï¿½ï¿½?ï¿½ï¿½
+*
+* @param hadc
+*/
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
-
-	ADC_ChannelConfTypeDef sConfig = {0};
-	sConfig.Channel = ADC_CHANNEL_VREFINT;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-	{
-		Error_Handler();
-	}
+	flag_ADCDone = true;
 }
 
-
-
-static void select_ADC_TEMP(void)
+void ADCLoop(void)
 {
-	ADC_ChannelConfTypeDef sConfig = {0};
-	sConfig.Channel = ADC_CHANNEL_TEMPSENSOR;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	if(flag_ADCDone)
 	{
-		Error_Handler();
+		// printf("%d %d %d", ADCValue[0], ADCValue[1], ADCValue[2]);
+		VrefVoltage = __HAL_ADC_CALC_VREFANALOG_VOLTAGE( ADCValue[1], ADC_RESOLUTION_12B);
+		TemperatureValue = __HAL_ADC_CALC_TEMPERATURE(VrefVoltage, ADCValue[0], ADC_RESOLUTION_12B);
+		printf("Vref: %f Temperature: %f\r\n", VrefVoltage, TemperatureValue);
+
+		flag_ADCDone = false;
+		HAL_ADC_Start_DMA(&hadc1, (uint32_t *)ADCValue, 2); /* ADC ?ï¿½ï¿½?ï¿½ï¿½ */
 	}
 }
 
@@ -140,8 +125,7 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
 
-	char msg_1[80];
-		uint8_t power_mode = 1; //(Santiago D) 1 => 3.86mA, 2 =>  <10uA.
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -162,13 +146,15 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
-  HAL_TIM_Base_Start(&htim2);
-
+  // HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
+  //HAL_TIM_Base_Start(&htim2);
+  // HAL_ADC_Start_IT(&hadc1);
+  ADCInit();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -178,50 +164,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  select_ADC_TEMP();
-	  	HAL_ADC_Start(&hadc1);
-	  	HAL_ADC_PollForConversion(&hadc1, ADC_TEMPSENSOR_DELAY_US); // Poll ADC1 Perihperal & TimeOut = 1mSec
-	  	ADCstep_temp=HAL_ADC_GetValue(&hadc1); // Read The ADC Conversion Result & Map It To PWM DutyCycle
-	  HAL_ADC_Stop(&hadc1);
-
-	  	select_ADC_VBAT();
-	  	HAL_ADC_Start(&hadc1);
-	  	HAL_ADC_PollForConversion(&hadc1, ADC_TEMPSENSOR_DELAY_US); // Poll ADC1 Perihperal & TimeOut = 1mSec
-	  	ADCstep_VBAT=HAL_ADC_GetValue(&hadc1); // Read The ADC Conversion Result & Map It To PWM DutyCycle
-	  HAL_ADC_Stop(&hadc1);
-
-	  	select_ADC_VREFINT();
-	  	HAL_ADC_Start(&hadc1);
-	  	HAL_ADC_PollForConversion(&hadc1, ADC_TEMPSENSOR_DELAY_US); // Poll ADC1 Perihperal & TimeOut = 1mSec
-	  	ADCstep_VREF=HAL_ADC_GetValue(&hadc1); // Read The ADC Conversion Result & Map It To PWM DutyCycle
-	  	HAL_ADC_Stop(&hadc1);
-
-	  	// VREF
-	  	VREF =3*(float)((int32_t) *(VREFINTCAL))/ADCstep_VREF;
-
-	  	// VBAT
-	  	VBAT =3*VREF*ADCstep_VBAT/4096;//Divider by 3
-
-	  	float TC1=(float)((int32_t) *(TS_CAL1));
-	  	float TC2=(float)((int32_t) *(TS_CAL2));
-
-	  	tempf = ((float)TEMP_CAL2-(float)TEMP_CAL1) / (TC2 - TC1) * (ADCstep_temp*VREF/VCALIB - TC1) + 30.0F;
-
-
-	printf(" temperature : %f\n", tempf);
-	  	//uint8_t tempi = round(tempf);
-	  	//snprintf(msg_1, sizeof(msg_1), "%0d\n\n", tempi);
-	 // HAL_UART_Transmit(&huart2, (uint8_t *)msg_1, strlen(msg_1), 200);
-
-	    	switch(power_mode)
-	    	{
-	    	case 1:
-	    		HAL_Delay(1000);
-	    		break;
-	    	default:
-	    		break;
-	    	}
-
+	 
+ ADCLoop();
   }
   /* USER CODE END 3 */
 }
@@ -254,13 +198,8 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.MSIState = RCC_MSI_ON;
   RCC_OscInitStruct.MSICalibrationValue = 0;
-  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_6;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
-  RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 18;
-  RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
-  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+  RCC_OscInitStruct.MSIClockRange = RCC_MSIRANGE_10;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -270,12 +209,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_MSI;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -289,17 +228,7 @@ void SystemClock_Config(void)
 
 
 
-// void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-// {
 
-//    if(htim->Instance==TIM2)
-//    {
-
-//        printf("temperature : %f\n", adc_ReadInternalTemp());
-
-
-//    }
-// }
 /* USER CODE END 4 */
 
 /**
