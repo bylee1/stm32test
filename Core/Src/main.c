@@ -62,7 +62,7 @@ int ADCstep_VREF=0;
 float tempf=0.0f;
 int tempi=0;
 
-float VAPLI=3.475;
+float VAPLI=3.47;
 float VCALIB=3.00;
 float VBAT=0;
 float VREF=0;
